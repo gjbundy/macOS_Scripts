@@ -14,6 +14,46 @@ shortURL="{{Put your own URL here}}"
 currentUser="$(echo "show State:/Users/ConsoleUser" | scutil | awk '/Name :/ && ! /loginwindow/ { print $3 }')"
 echo "Current User: $currentUser"
 
+#Check for PIVToken disabled in /Library/Preferences/com.apple.security.smartcard
+checkForDisabledPIV() {
+  # Read the current DisabledTokens array
+  disabled_tokens=$(defaults read /Library/Preferences/com.apple.security.smartcard DisabledTokens 2>/dev/null)
+
+  # Check if the array is not empty and contains the .pivtoken entry
+  if [[ "$disabled_tokens" == *"com.apple.CryptoTokenKit.pivtoken"* ]]; then
+    echo "pivtoken is disabled. Removing it from DisabledTokens."
+    messages+=("pivtoken is disabled. Removing it from DisabledTokens.")
+
+    # Remove the .pivtoken entry using PlistBuddy
+    sudo /usr/libexec/PlistBuddy -c "Delete :DisabledTokens:com.apple.CryptoTokenKit.pivtoken" /Library/Preferences/com.apple.security.smartcard.plist
+
+  # Re-check the DisabledTokens array to see if it is now empty
+  disabled_tokens=$(defaults read /Library/Preferences/com.apple.security.smartcard DisabledTokens 2>/dev/null | tr -d '[:space:]')
+
+  if [[ "$disabled_tokens" != *"com.apple.CryptoTokenKit.pivtoken"* ]]; then
+    echo "pivtoken is not disabled."
+    messages+=("pivtoken has been verified as enabled.")
+  fi
+
+  # Read the DisabledTokens array and count the number of items
+  item_count=$(sudo /usr/libexec/PlistBuddy -c "Print :DisabledTokens" /Library/Preferences/com.apple.security.smartcard.plist | grep -v "Array {" | grep -v "}" | wc -l)
+
+  #If the DisabledTokens array is now empty, delete the entire key
+  echo "Number of items in DisabledTokens: $item_count"
+  if [ $item_count -eq 0 ]; then
+    sudo /usr/libexec/PlistBuddy -c "Delete :DisabledTokens" /Library/Preferences/com.apple.security.smartcard.plist 2>/dev/null
+    echo "DisabledTokens key removed as it was empty."
+    messages+=("DisabledTokens key removed as it was empty.")
+  else
+    echo "DisabledTokens key retained with remaining entries."
+    messages+=("DisabledTokens key retained with remaining entries.")
+  fi
+  else
+    echo "pivtoken is not disabled."
+    messages+=("pivtoken has been verified as enabled.")
+  fi
+}
+
 # Check for pairing
 checkForPaired() {
   tokenCheck=$(/usr/bin/dscl . read /Users/"$currentUser" AuthenticationAuthority | grep -c tokenidentity)
@@ -76,6 +116,7 @@ You can move this window to the side until you have finished."
     getUPN
     createAltSecId
     createMapping
+    checkForDisabledPIV
     disablePairingUI
     resetAuthenticator
     showFinalStatus
